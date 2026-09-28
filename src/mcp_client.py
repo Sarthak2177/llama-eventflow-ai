@@ -301,7 +301,7 @@ async def _call_mcp(session: ClientSession, tool_name: str, args: dict) -> list 
 
 
 async def _search_entity(session: ClientSession, entity_type: str, name: str = None, domain_name: str = None, entity_id: str = None) -> dict:
-    """Executes the search_solace_entity logic."""
+    """Executes the search_solace_entity logic with fuzzy matching."""
     args = {}
     if entity_id:
         args["ids"] = [entity_id]
@@ -312,27 +312,44 @@ async def _search_entity(session: ClientSession, entity_type: str, name: str = N
         # Resolve the domain name to an applicationDomainId
         domain_res = await _call_mcp(session, "getApplicationDomains", {"name": domain_name})
         if not domain_res:
-            return {"error": f"Domain '{domain_name}' not found."}
+            # Fallback: fetch all domains and do fuzzy match
+            all_domains = await _call_mcp(session, "getApplicationDomains", {})
+            if all_domains and isinstance(all_domains, list):
+                matches = [d for d in all_domains if domain_name.lower() in d.get("name", "").lower()]
+                if matches:
+                    domain_res = [matches[0]]
+            
+            if not domain_res:
+                return {"error": f"Domain '{domain_name}' not found."}
         args["applicationDomainId"] = domain_res[0]["id"]
     
     data = []
-    if entity_type == "domain":
-        data = await _call_mcp(session, "getApplicationDomains", args)
-    elif entity_type == "application":
-        data = await _call_mcp(session, "getApplications", args)
-    elif entity_type == "event":
-        data = await _call_mcp(session, "getEvents", args)
-    elif entity_type == "event_api":
-        data = await _call_mcp(session, "getEventApis", args)
-    elif entity_type == "event_api_product":
-        data = await _call_mcp(session, "getEventApiProducts", args)
-    elif entity_type == "schema":
-        data = await _call_mcp(session, "getSchemas", args)
-    elif entity_type == "enum":
-        if "name" in args: args["names"] = [args.pop("name")]
-        data = await _call_mcp(session, "getEnums", args)
-    else:
-        return {"error": f"Unsupported entity_type: {entity_type}"}
+    
+    async def _fetch_data(search_args):
+        if entity_type == "domain": return await _call_mcp(session, "getApplicationDomains", search_args)
+        elif entity_type == "application": return await _call_mcp(session, "getApplications", search_args)
+        elif entity_type == "event": return await _call_mcp(session, "getEvents", search_args)
+        elif entity_type == "event_api": return await _call_mcp(session, "getEventApis", search_args)
+        elif entity_type == "event_api_product": return await _call_mcp(session, "getEventApiProducts", search_args)
+        elif entity_type == "schema": return await _call_mcp(session, "getSchemas", search_args)
+        elif entity_type == "enum": 
+            if "name" in search_args: 
+                search_args_copy = search_args.copy()
+                search_args_copy["names"] = [search_args_copy.pop("name")]
+                return await _call_mcp(session, "getEnums", search_args_copy)
+            return await _call_mcp(session, "getEnums", search_args)
+        else: return {"error": f"Unsupported entity_type: {entity_type}"}
+
+    data = await _fetch_data(args)
+    
+    # Fuzzy match fallback for entity names
+    if name and not data and isinstance(data, list):
+        # Drop the exact 'name' filter and fetch all (filtered by domain if provided)
+        fallback_args = args.copy()
+        fallback_args.pop("name")
+        all_data = await _fetch_data(fallback_args)
+        if all_data and isinstance(all_data, list):
+            data = [d for d in all_data if name.lower() in d.get("name", "").lower()]
 
     if entity_type == "domain" or not isinstance(data, list):
         return {"result": data}

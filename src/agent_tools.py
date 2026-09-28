@@ -23,8 +23,8 @@ async def search_solace_entity(entity_type: str, name: str = None, domain_name: 
 
 @tool
 async def get_entity_relationships(entity_id: str, relationship_type: str):
-    """Fetches the related objects (like applications inside a domain, or events produced/consumed by an application).
-    relationship_type: applications, produced_events, consumed_events, event_apis, consuming_applications
+    """Fetches related objects (e.g. applications inside a domain, events produced/consumed by an app, or event_apis included in an event_api_product).
+    relationship_type MUST be one of: applications, produced_events, consumed_events, event_apis, consuming_applications
     """
     if not mcp_session: return "Error: mcp_session not set"
     res = await mcp_client._get_relationships(mcp_session, entity_id, relationship_type)
