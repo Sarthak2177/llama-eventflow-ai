@@ -488,7 +488,18 @@ async def _get_relationships(session: ClientSession, entity_id: str, relationshi
         for api_vid in api_ver_ids:
             api_ver = await _call_mcp(session, "getEventApiVersions", {"ids": [api_vid]})
             if api_ver and not isinstance(api_ver, dict):
-                apis.append({"version_id": api_vid, "event_api_id": api_ver[0].get("eventApiId"), "version": api_ver[0].get("version")})
+                api_id = api_ver[0].get("eventApiId")
+                version = api_ver[0].get("version")
+                # Fetch parent to get the name
+                parent_api = await _call_mcp(session, "getEventApis", {"ids": [api_id]})
+                name = parent_api[0].get("name", "Unknown") if parent_api and not isinstance(parent_api, dict) else "Unknown"
+                
+                apis.append({
+                    "name": name,
+                    "version_id": api_vid, 
+                    "event_api_id": api_id, 
+                    "version": version
+                })
         return {"result": apis}
 
     elif relationship_type == "consuming_applications":
@@ -504,9 +515,15 @@ async def _get_relationships(session: ClientSession, entity_id: str, relationshi
             for app in apps:
                 app_consumed = app.get("declaredConsumedEventVersionIds", [])
                 if any(ev_id in app_consumed for ev_id in produced_events):
+                    app_id = app.get("applicationId")
+                    # Fetch the parent application to get its name
+                    parent_app = await _call_mcp(session, "getApplications", {"ids": [app_id]})
+                    name = parent_app[0].get("name", "Unknown") if parent_app and not isinstance(parent_app, dict) else "Unknown"
+                    
                     consuming_apps.append({
+                        "name": name,
                         "version_id": app.get("id"),
-                        "application_id": app.get("applicationId"),
+                        "application_id": app_id,
                         "version": app.get("version")
                     })
                     
