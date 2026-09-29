@@ -12,46 +12,7 @@ def set_mcp_session(session):
     global mcp_session
     mcp_session = session
 
-def format_payload(res, keep_raw=False):
-    """Converts bulky Solace JSON into a minimal, human-readable string to save LLM context window tokens."""
-    if keep_raw:
-        return json.dumps(res)
-        
-    if not res:
-        return "No results found."
-        
-    if isinstance(res, dict) and "error" in res:
-        return f"Error: {res['error']}"
-        
-    data = res.get("result", res) if isinstance(res, dict) else res
-    
-    if isinstance(data, list):
-        if not data:
-            return "No items found."
-        lines = []
-        for item in data:
-            if isinstance(item, dict):
-                name = item.get("name", "Unnamed")
-                ent_id = item.get("id", item.get("versionId", "Unknown ID"))
-                version = item.get("version", "")
-                v_str = f" (v{version})" if version else ""
-                lines.append(f"- {name}{v_str} [ID: {ent_id}]")
-            else:
-                lines.append(f"- {str(item)}")
-        return "\n".join(lines)
-        
-    if isinstance(data, dict):
-        if "entity" in data:  # Duplicate response format
-            ent = data["entity"]
-            return f"Success: {ent.get('name')} [ID: {ent.get('id')}]"
-        
-        name = data.get("name", "Unnamed")
-        ent_id = data.get("id", data.get("versionId", "Unknown ID"))
-        version = data.get("version", "")
-        v_str = f" (v{version})" if version else ""
-        return f"{name}{v_str} [ID: {ent_id}]"
-        
-    return str(data)
+
 
 @tool
 async def search_solace_entity(entity_type: str, name: str = None, domain_name: str = None, entity_id: str = None):
@@ -60,16 +21,16 @@ async def search_solace_entity(entity_type: str, name: str = None, domain_name: 
     """
     if not mcp_session: return "Error: mcp_session not set"
     res = await mcp_client._search_entity(mcp_session, entity_type, name, domain_name, entity_id)
-    return format_payload(res)
+    return json.dumps(res)
 
 @tool
 async def get_entity_relationships(entity_id: str, relationship_type: str):
     """Fetches related objects (e.g. applications inside a domain, events produced/consumed by an app, or event_apis included in an event_api_product).
-    relationship_type MUST be one of: applications, produced_events, consumed_events, event_apis, consuming_applications
+    relationship_type MUST be one of: applications, produced_events, consumed_events, event_apis, event_api_products, consuming_applications
     """
     if not mcp_session: return "Error: mcp_session not set"
     res = await mcp_client._get_relationships(mcp_session, entity_id, relationship_type)
-    return format_payload(res)
+    return json.dumps(res)
 
 @tool
 async def duplicate_solace_entity(entity_type: str, source_entity_id: str, new_name: str):
@@ -78,7 +39,7 @@ async def duplicate_solace_entity(entity_type: str, source_entity_id: str, new_n
     """
     if not mcp_session: return "Error: mcp_session not set"
     res = await mcp_client._duplicate_entity(mcp_session, entity_type, source_entity_id, new_name)
-    return format_payload(res)
+    return json.dumps(res)
 
 @tool
 async def update_entity_relationship(entity_type: str, version_id: str, action: str, target_type: str, target_version_id: str):
@@ -87,7 +48,7 @@ async def update_entity_relationship(entity_type: str, version_id: str, action: 
     """
     if not mcp_session: return "Error: mcp_session not set"
     res = await mcp_client._update_relationship(mcp_session, entity_type, version_id, action, target_type, target_version_id)
-    return format_payload(res)
+    return json.dumps(res)
 
 @tool
 async def get_entity_impact(entity_type: str, version_id: str):
@@ -98,7 +59,7 @@ async def get_entity_impact(entity_type: str, version_id: str):
     if not mcp_session: return "Error: mcp_session not set"
     if entity_type == "event":
         res = await mcp_client._get_relationships(mcp_session, version_id, "consuming_applications")
-        return format_payload(res)
+        return json.dumps(res)
     return json.dumps({"error": "Impact lookup not fully implemented for this type."})
 
 @tool

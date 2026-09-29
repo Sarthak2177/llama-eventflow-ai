@@ -4,7 +4,7 @@ import sys
 from src import config
 from src.mcp_client import managed_session
 from src.agent_tools import set_mcp_session, ALL_TOOLS
-from src.agent import get_agent_graph
+from src.agent import execute_agent
 from langchain_core.messages import HumanMessage, AIMessage
 
 BANNER = f"""
@@ -57,8 +57,6 @@ async def main():
         async with managed_session() as session:
             set_mcp_session(session)
             print(f"[OK] Connected — Smart Router Active.\n")
-
-            app_graph = get_agent_graph()
             history = []
 
             while True:
@@ -89,40 +87,32 @@ async def main():
                     print()
                 else:
                     print("\n[...] Thinking...\n")
-                    history.append(HumanMessage(content=user_input))
-                    
                     try:
-                        result = await app_graph.ainvoke({"messages": history, "session_id": "cli-session"}, config={"recursion_limit": 50})
-                        
-                        last_message = result["messages"][-1]
-                        if isinstance(last_message, AIMessage):
-                            if last_message.additional_kwargs.get("requires_approval"):
-                                print("EventFlow AI:")
-                                print("I need your approval to execute the following operations:")
-                                for tc in getattr(last_message, "tool_calls", []):
-                                    print(f"- {tc['name']} with args: {tc['args']}")
-                                print()
-                                approval = input("Type 'approve' to proceed or 'reject' to cancel: ").strip()
+                        async def approval_callback(tool_calls: list) -> bool:
+                            if persona == "end_user":
+                                print("\n[!] Access Denied: End User persona cannot execute WRITE operations.")
+                                return False
                                 
-                                history = list(result["messages"][-20:])
-                                
-                                if approval.lower() == "approve":
-                                    history.append(HumanMessage(content="User approved the operation. Please proceed."))
-                                    result2 = await app_graph.ainvoke({"messages": history, "session_id": "cli-session"}, config={"recursion_limit": 50})
-                                    
-                                    last_message2 = result2['messages'][-1]
-                                    if isinstance(last_message2, AIMessage):
-                                        print(f"EventFlow AI:\n{last_message2.content}\n")
-                                    
-                                    history = list(result2["messages"][-20:])
-                                else:
-                                    history.append(HumanMessage(content="User rejected the operation."))
-                                    print("Operation cancelled.")
+                            print("EventFlow AI:")
+                            print("I need your approval to execute the following WRITE operations:")
+                            for tc in tool_calls:
+                                print(f"- {tc['name']} with args: {tc['args']}")
+                            print()
+                            approval = input("Type 'approve' to proceed or 'reject' to cancel: ").strip()
+                            if approval.lower() == "approve":
+                                return True
                             else:
-                                print(f"EventFlow AI:\n{last_message.content}\n")
-                                history = list(result["messages"][-20:])
-                        else:
-                            history = list(result["messages"][-20:])
+                                print("Operation cancelled.")
+                                return False
+
+                        final_answer = await execute_agent(user_input, history, approval_callback)
+                        
+                        print(f"EventFlow AI:\n{final_answer}\n")
+                        
+                        # Add to history to maintain conversational context
+                        history.append(HumanMessage(content=user_input))
+                        history.append(AIMessage(content=final_answer))
+                        history = history[-10:] # Keep only the last 10 messages to prevent bloat
                         
                         print("-" * 72)
                     except Exception as exc:

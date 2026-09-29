@@ -164,18 +164,18 @@ async def _manage_queue(action: str, queue_name: str, args: dict) -> dict:
             "ingressEnabled": True,
             "egressEnabled": True
         }
-        if "max_ttl" in args:
+        if args.get("max_ttl") is not None:
             body["maxTtl"] = args["max_ttl"]
-        if "max_msg_spool_usage" in args:
+        if args.get("max_msg_spool_usage") is not None:
             body["maxMsgSpoolUsage"] = args["max_msg_spool_usage"]
             
         return await _semp_request("POST", f"/SEMP/v2/config/msgVpns/{vpn}/queues", body)
         
     elif action == "update":
         body = {}
-        if "max_ttl" in args:
+        if args.get("max_ttl") is not None:
             body["maxTtl"] = args["max_ttl"]
-        if "max_msg_spool_usage" in args:
+        if args.get("max_msg_spool_usage") is not None:
             body["maxMsgSpoolUsage"] = args["max_msg_spool_usage"]
             
         if not body:
@@ -200,11 +200,11 @@ async def _manage_queue(action: str, queue_name: str, args: dict) -> dict:
             "queueName": new_queue_name,
             "msgVpnName": vpn,
             "accessType": source_data.get("accessType", "non-exclusive"),
-            "maxMsgSpoolUsage": args.get("max_msg_spool_usage", source_data.get("maxMsgSpoolUsage", 5000)),
+            "maxMsgSpoolUsage": args["max_msg_spool_usage"] if args.get("max_msg_spool_usage") is not None else source_data.get("maxMsgSpoolUsage", 5000),
             "permission": source_data.get("permission", "consume"),
             "ingressEnabled": source_data.get("ingressEnabled", True),
             "egressEnabled": source_data.get("egressEnabled", True),
-            "maxTtl": args.get("max_ttl", source_data.get("maxTtl", 0)),
+            "maxTtl": args["max_ttl"] if args.get("max_ttl") is not None else source_data.get("maxTtl", 0),
             "maxBindCount": source_data.get("maxBindCount", 1000),
             "maxDeliveredUnackedMsgsPerFlow": source_data.get("maxDeliveredUnackedMsgsPerFlow", 10000),
             "maxMsgSize": source_data.get("maxMsgSize", 10000000),

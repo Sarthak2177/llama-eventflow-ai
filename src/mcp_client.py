@@ -414,6 +414,14 @@ async def _get_schema_content(session: ClientSession, entity_id: str) -> dict:
 async def _get_relationships(session: ClientSession, entity_id: str, relationship_type: str) -> dict:
     """Executes the get_entity_relationships logic by chaining Solace tools."""
     
+    # Helper to fetch version by trying both 'ids' (version ID) and 'XXXIds' (base ID)
+    async def _fetch_versions(tool_name, base_id_param):
+        res = await _call_mcp(session, tool_name, {"ids": [entity_id]})
+        if res and isinstance(res, list) and len(res) > 0: return res
+        res = await _call_mcp(session, tool_name, {base_id_param: [entity_id]})
+        if res and isinstance(res, list) and len(res) > 0: return res
+        return []
+    
     if relationship_type == "applications":
         # Find all apps within a domain
         data = await _call_mcp(session, "getApplications", {"applicationDomainId": entity_id})
@@ -424,32 +432,42 @@ async def _get_relationships(session: ClientSession, entity_id: str, relationshi
     elif relationship_type in ["produced_events", "consumed_events"]:
         event_version_ids = []
         
-        # Helper to fetch version by trying both 'ids' (version ID) and 'XXXIds' (base ID)
-        async def _fetch_versions(tool_name, base_id_param):
-            res = await _call_mcp(session, tool_name, {"ids": [entity_id]})
-            if res and isinstance(res, list) and len(res) > 0: return res
-            res = await _call_mcp(session, tool_name, {base_id_param: [entity_id]})
-            if res and isinstance(res, list) and len(res) > 0: return res
-            return []
+
 
         # 1. Try treating entity_id as an Application
         app_versions = await _fetch_versions("getApplicationVersions", "applicationIds")
         if app_versions:
-            latest = app_versions[0]
-            if relationship_type == "produced_events":
-                event_version_ids = latest.get("declaredProducedEventVersionIds", [])
-            else:
-                event_version_ids = latest.get("declaredConsumedEventVersionIds", [])
+            for ver in app_versions:
+                if relationship_type == "produced_events":
+                    event_version_ids.extend(ver.get("declaredProducedEventVersionIds", []))
+                else:
+                    event_version_ids.extend(ver.get("declaredConsumedEventVersionIds", []))
                 
         # 2. Try treating entity_id as an Event API if it wasn't an Application
         if not app_versions:
             api_versions = await _fetch_versions("getEventApiVersions", "eventApiIds")
             if api_versions:
-                latest = api_versions[0]
-                if relationship_type == "produced_events":
-                    event_version_ids = latest.get("producedEventVersionIds", [])
-                else:
-                    event_version_ids = latest.get("consumedEventVersionIds", [])
+                for ver in api_versions:
+                    if relationship_type == "produced_events":
+                        event_version_ids.extend(ver.get("producedEventVersionIds", []))
+                    else:
+                        event_version_ids.extend(ver.get("consumedEventVersionIds", []))
+                        
+        # 3. Try treating entity_id as an Event API Product if it wasn't an App or API
+        if not app_versions and not api_versions:
+            prod_versions = await _fetch_versions("getEventApiProductVersions", "eventApiProductIds")
+            if prod_versions:
+                for pver in prod_versions:
+                    api_ver_ids = pver.get("eventApiVersionIds", [])
+                    for api_vid in api_ver_ids:
+                        api_ver = await _call_mcp(session, "getEventApiVersions", {"ids": [api_vid]})
+                        if api_ver and not isinstance(api_ver, dict):
+                            if relationship_type == "produced_events":
+                                event_version_ids.extend(api_ver[0].get("producedEventVersionIds", []))
+                            else:
+                                event_version_ids.extend(api_ver[0].get("consumedEventVersionIds", []))
+                                
+        event_version_ids = list(set(event_version_ids)) # Deduplicate
                     
         if not event_version_ids:
             return {"result": []}
@@ -479,9 +497,38 @@ async def _get_relationships(session: ClientSession, entity_id: str, relationshi
         return {"result": resolved_events}
 
     elif relationship_type == "event_apis":
-        prod_vers = await _call_mcp(session, "getEventApiProductVersions", {"eventApiProductIds": [entity_id]})
+        # Check if the entity_id is an Event
+        evt_vers = await _fetch_versions("getEventVersions", "eventIds")
+        if evt_vers:
+            ev_ids = [v.get("id") for v in evt_vers]
+            # We are querying UPWARD: Find all APIs that produce or consume this event
+            all_api_vers = await _call_mcp(session, "getEventApiVersions", {})
+            apis = []
+            if isinstance(all_api_vers, list):
+                for api_ver in all_api_vers:
+                    prod = api_ver.get("producedEventVersionIds", [])
+                    cons = api_ver.get("consumedEventVersionIds", [])
+                    if any(ev_id in prod or ev_id in cons for ev_id in ev_ids):
+                        api_id = api_ver.get("eventApiId")
+                        parent_api = await _call_mcp(session, "getEventApis", {"ids": [api_id]})
+                        name = parent_api[0].get("name", "Unknown") if parent_api and not isinstance(parent_api, dict) else "Unknown"
+                        apis.append({
+                            "name": name,
+                            "version_id": api_ver.get("id"),
+                            "event_api_id": api_id,
+                            "version": api_ver.get("version")
+                        })
+            return {"result": apis}
+        
+        # Default behavior: We are querying DOWNWARD from an Event API Product
+        prod_vers = await _fetch_versions("getEventApiProductVersions", "eventApiProductIds")
         if not prod_vers or isinstance(prod_vers, dict): return {"result": []}
-        api_ver_ids = prod_vers[0].get("eventApiVersionIds", [])
+        
+        api_ver_ids = []
+        for pv in prod_vers:
+            api_ver_ids.extend(pv.get("eventApiVersionIds", []))
+        api_ver_ids = list(set(api_ver_ids)) # Deduplicate
+        
         if not api_ver_ids: return {"result": []}
         
         apis = []
@@ -501,6 +548,47 @@ async def _get_relationships(session: ClientSession, entity_id: str, relationshi
                     "version": version
                 })
         return {"result": apis}
+
+    elif relationship_type == "event_api_products":
+        # We are querying UPWARD from either an Event or an Event API
+        target_api_vids = []
+        
+        # Is it an Event?
+        evt_vers = await _fetch_versions("getEventVersions", "eventIds")
+        if evt_vers:
+            ev_ids = [v.get("id") for v in evt_vers]
+            all_api_vers = await _call_mcp(session, "getEventApiVersions", {})
+            if isinstance(all_api_vers, list):
+                for api_ver in all_api_vers:
+                    prod = api_ver.get("producedEventVersionIds", [])
+                    cons = api_ver.get("consumedEventVersionIds", [])
+                    if any(ev_id in prod or ev_id in cons for ev_id in ev_ids):
+                        target_api_vids.append(api_ver.get("id"))
+        else:
+            # Is it an Event API?
+            api_vers = await _fetch_versions("getEventApiVersions", "eventApiIds")
+            if api_vers:
+                target_api_vids.extend([v.get("id") for v in api_vers])
+                
+        if not target_api_vids:
+            return {"result": []}
+            
+        all_prod_vers = await _call_mcp(session, "getEventApiProductVersions", {})
+        products = []
+        if isinstance(all_prod_vers, list):
+            for prod_ver in all_prod_vers:
+                prod_api_vids = prod_ver.get("eventApiVersionIds", [])
+                if any(vid in prod_api_vids for vid in target_api_vids):
+                    prod_id = prod_ver.get("eventApiProductId")
+                    parent_prod = await _call_mcp(session, "getEventApiProducts", {"ids": [prod_id]})
+                    name = parent_prod[0].get("name", "Unknown") if parent_prod and not isinstance(parent_prod, dict) else "Unknown"
+                    products.append({
+                        "name": name,
+                        "version_id": prod_ver.get("id"),
+                        "event_api_product_id": prod_id,
+                        "version": prod_ver.get("version")
+                    })
+        return {"result": products}
 
     elif relationship_type == "consuming_applications":
         # Forward to impact analysis. Assumes entity_id is a parent ID and fetches latest version.
