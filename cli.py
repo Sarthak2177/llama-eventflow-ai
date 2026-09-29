@@ -96,16 +96,19 @@ async def main():
                         
                         last_message = result["messages"][-1]
                         if isinstance(last_message, AIMessage):
-                            print(f"EventFlow AI:\n{last_message.content}\n")
                             if last_message.additional_kwargs.get("requires_approval"):
+                                print("EventFlow AI:")
+                                print("I need your approval to execute the following operations:")
+                                for tc in getattr(last_message, "tool_calls", []):
+                                    print(f"- {tc['name']} with args: {tc['args']}")
+                                print()
                                 approval = input("Type 'approve' to proceed or 'reject' to cancel: ").strip()
                                 
-                                # CRITICAL FIX: Update history with the result messages before proceeding
                                 history = list(result["messages"][-20:])
                                 
                                 if approval.lower() == "approve":
                                     history.append(HumanMessage(content="User approved the operation. Please proceed."))
-                                    result2 = await app_graph.ainvoke({"messages": history, "session_id": "cli-session"})
+                                    result2 = await app_graph.ainvoke({"messages": history, "session_id": "cli-session"}, config={"recursion_limit": 50})
                                     
                                     last_message2 = result2['messages'][-1]
                                     if isinstance(last_message2, AIMessage):
@@ -116,6 +119,7 @@ async def main():
                                     history.append(HumanMessage(content="User rejected the operation."))
                                     print("Operation cancelled.")
                             else:
+                                print(f"EventFlow AI:\n{last_message.content}\n")
                                 history = list(result["messages"][-20:])
                         else:
                             history = list(result["messages"][-20:])

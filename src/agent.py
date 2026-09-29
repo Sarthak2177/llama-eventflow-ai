@@ -61,23 +61,28 @@ Never fabricate data — only report what the tools return.
 For Create, Update, or Delete operations, the system will pause and ask the user for approval. Do NOT hallucinate IDs, always search for them first.
 """
 
-def should_continue(state: AgentState) -> Literal["tools", "human_approval", "__end__"]:
+def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     messages = state["messages"]
     last_message = messages[-1]
     
     if not getattr(last_message, "tool_calls", None):
         return "__end__"
         
-    # If the user explicitly approved the operation in the previous turn, bypass the check and execute
+    # Check if we just received a command to execute approved tools from the CLI
     if len(messages) >= 2:
-        prev_msg = messages[-2]
-        if isinstance(prev_msg, HumanMessage) and "User approved the operation" in prev_msg.content:
+        prev = messages[-2]
+        if isinstance(prev, HumanMessage) and "User approved the operation" in prev.content:
+            # The CLI appended this. We need to actually execute the tools!
+            # But the last message is an AIMessage with tool_calls. We can just route to tools.
             return "tools"
-    
+            
     # Check if any tool call is mutating
     for tc in last_message.tool_calls:
         if is_mutating_tool_call(tc):
-            return "human_approval"
+            # If it's mutating, and we haven't just approved it, pause execution by going to end
+            # We will add a flag to the AIMessage so the CLI knows it needs approval
+            last_message.additional_kwargs["requires_approval"] = True
+            return "__end__"
             
     return "tools"
 
@@ -93,57 +98,40 @@ def agent_node(state: AgentState):
     history_tool_names = set()
     for msg in reversed(messages):
         if isinstance(msg, HumanMessage):
-            user_query = msg.content
-            break
+            if "User approved" not in msg.content and "User rejected" not in msg.content:
+                user_query = msg.content
+                break
         if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls"):
             for tc in msg.tool_calls:
                 history_tool_names.add(tc["name"])
                 
-    # Use Gemma's dynamic tool selector
-    # It returns (ollama_tools, mcp_tools) where mcp_tools are our selected LangChain tools
     _, selected_tools = select_relevant_tools(ALL_TOOLS, user_query, max_tools=10, history_tool_names=history_tool_names)
-    
-    # Bind only the dynamically selected tools
     llm_with_tools = llm.bind_tools(selected_tools)
     
     if not any(isinstance(m, HumanMessage) for m in messages):
-        # Should have a human message
         return {"messages": []}
         
-    # Inject system prompt
-    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [m for m in messages]
+    # Filter out the "User approved" messages from the LLM's context to avoid confusing it
+    # AND remove any AIMessages that have requires_approval=True that were left hanging
+    filtered_messages = []
+    for m in messages:
+        if isinstance(m, HumanMessage) and ("User approved" in m.content or "User rejected" in m.content):
+            continue
+        filtered_messages.append(m)
+        
+    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + filtered_messages
     
     response = llm_with_tools.invoke(full_messages)
     return {"messages": [response]}
-
-
-def human_approval_node(state: AgentState):
-    # This node is reached when a mutating tool is called.
-    # In LangGraph, we can use an interrupt. Here we just return a message asking for approval,
-    # or rely on the host application to handle the interrupt.
-    # For this architecture, we will yield a special message that the UI/CLI will catch.
-    last_message = state["messages"][-1]
-    tool_calls = getattr(last_message, "tool_calls", [])
-    
-    msg = f"I need your approval to execute the following operations:\n"
-    for tc in tool_calls:
-        msg += f"- {tc['name']} with args: {tc['args']}\n"
-    msg += "\nPlease type 'approve' to proceed or 'reject' to cancel."
-    
-    return {"messages": [AIMessage(content=msg, additional_kwargs={"requires_approval": True, "pending_tool_calls": tool_calls})]}
-
 
 # Define the graph
 graph_builder = StateGraph(AgentState)
 graph_builder.add_node("agent", agent_node)
 graph_builder.add_node("tools", ToolNode(ALL_TOOLS))
-graph_builder.add_node("human_approval", human_approval_node)
 
 graph_builder.add_edge(START, "agent")
 graph_builder.add_conditional_edges("agent", should_continue)
 graph_builder.add_edge("tools", "agent")
-# Human approval goes to END to wait for user input. The app will inject a ToolMessage or approval message.
-graph_builder.add_edge("human_approval", END) 
 
 app_graph = graph_builder.compile()
 
