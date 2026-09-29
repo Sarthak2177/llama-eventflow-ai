@@ -1,139 +1,155 @@
-from typing import Annotated, Literal, Sequence, TypedDict
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
+import os
+from typing import List, Dict, Any, Callable, Awaitable
 from langchain_ollama import ChatOllama
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from .agent_tools import (
+    search_solace_entity, get_entity_relationships, duplicate_solace_entity,
+    update_entity_relationship, get_entity_impact, get_schema_content,
+    create_solace_entity, create_solace_entity_version,
+    delete_solace_entity, delete_solace_entity_version,
+    manage_solace_queue, get_queue_stats, list_queues,
+    get_queue_subscriptions, manage_queue_subscription, get_client_username
+)
 
-from . import config
-from .agent_tools import ALL_TOOLS
-from .tool_selector import select_relevant_tools
-
-class AgentState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    session_id: str
-
-MUTATING_TOOLS = {
-    "duplicate_solace_entity",
-    "update_entity_relationship",
-    "create_solace_entity",
-    "create_solace_entity_version",
-    "delete_solace_entity",
-    "delete_solace_entity_version",
-}
-
-# Add action specific mutating checking for broker tools
-def is_mutating_tool_call(tc) -> bool:
-    name = tc["name"]
-    if name in MUTATING_TOOLS:
-        return True
-    if name in ["manage_solace_queue", "manage_queue_subscription"]:
-        args = tc.get("args", {})
-        action = args.get("action", "")
-        if action in ["create", "update", "delete", "duplicate", "add", "remove"]:
-            return True
-    return False
+ALL_TOOLS = [
+    search_solace_entity, get_entity_relationships, duplicate_solace_entity,
+    update_entity_relationship, get_entity_impact, get_schema_content,
+    create_solace_entity, create_solace_entity_version,
+    delete_solace_entity, delete_solace_entity_version,
+    manage_solace_queue, get_queue_stats, list_queues,
+    get_queue_subscriptions, manage_queue_subscription, get_client_username
+]
 
 def get_llm():
-    try:
-        return ChatOllama(model=config.LLM_MODEL, base_url=config.LLM_BASE_URL, temperature=0.1, num_ctx=16384)
-    except Exception as e:
-        print(f"Failed to initialize LLM: {e}")
-        return None
+    return ChatOllama(
+        model=os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
+        base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+        temperature=0.0
+    )
 
-SYSTEM_PROMPT = """You are EventFlow AI, an expert assistant for the Solace Event Portal.
-You help users understand their Event-Driven Architecture.
+def is_mutating_tool_call(tool_call) -> bool:
+    name = tool_call.get("name", "") if isinstance(tool_call, dict) else getattr(tool_call, "name", "")
+    
+    # Check if the tool is generally mutating
+    if name in [
+        "create_solace_entity",
+        "create_solace_entity_version",
+        "duplicate_solace_entity",
+        "update_entity_relationship",
+        "delete_solace_entity",
+        "delete_solace_entity_version",
+    ]:
+        return True
+        
+    # For manage_solace_queue, "get" is read-only
+    if name == "manage_solace_queue":
+        args = tool_call.get("args", {}) if isinstance(tool_call, dict) else getattr(tool_call, "args", {})
+        return args.get("action") != "get"
+        
+    # For manage_queue_subscription, "list" is read-only
+    if name == "manage_queue_subscription":
+        args = tool_call.get("args", {}) if isinstance(tool_call, dict) else getattr(tool_call, "args", {})
+        return args.get("action") != "list"
+        
+    return False
 
-You have access to "Smart Tools" that automatically navigate the complex Solace API for you.
-Always follow this logic:
-1. If you need to list entities of a certain type or find an entity by name, use `search_solace_entity`.
-2. If you need to find what an entity contains, produces, or consumes (e.g. finding Event APIs included in an Event API Product), use `get_entity_relationships` with its ID.
-3. If you need to find what other entities rely on, reference, or will be affected by a given entity, use `get_entity_impact` with its version ID. For multi-hop impact (e.g., finding Event API Products affected by an Event), you must call `get_entity_impact` sequentially on the intermediate results.
-4. If you need to read the data fields, payload, or schema of an event, use `get_schema_content` with the Event ID.
-5. To check live queue statistics, message counts, or connected consumers on the Event Broker, use `get_queue_stats`.
-6. To check the ACL profile or configuration of a specific client username on the Event Broker, use `get_client_username`.
-7. If you are asked to find which queues have a specific condition (e.g. no consumers, accumulating messages), use `list_queues` to get a bulk telemetry array and filter it yourself.
-8. In this environment, a queue provisioned for an application generally shares the exact name as the application. To inspect it, use `get_queue_stats` with the application's name.
+# We will import select_relevant_tools inside to avoid circular dependencies if any
+from .tool_selector import select_relevant_tools
 
-When answering, always be concise and structured. Use bullet points.
-Never fabricate data — only report what the tools return.
+SYSTEM_PROMPT = """You are an autonomous AI assistant managing a Solace Event Broker and Event Portal.
+You have access to a set of native tools (functions) to read and write configuration.
 
-For Create, Update, or Delete operations, the system will pause and ask the user for approval. Do NOT hallucinate IDs, always search for them first.
+CRITICAL INSTRUCTION: You MUST execute these tools yourself using function calling. NEVER output CLI commands (like `manage_solace_queue --action...`) or tell the user to run them. You are the one executing the tools!
+
+1. When asked to find an entity, ALWAYS call the `search_solace_entity` tool first to get its exact ID.
+2. If you need related entities, call the `get_entity_relationships` tool with the ID you found.
+3. If you need the contents of a schema, call the `get_schema_content` tool.
+4. When asked to create or duplicate, always look up the parent Domain or Application first to ensure it exists and to get its ID.
+5. For managing queues, ALWAYS call the `manage_solace_queue` tool. 
+6. When answering, always be concise and structured. Use bullet points.
+7. Never fabricate data — only report what the tools return.
+8. For Create, Update, or Delete operations, the system will automatically pause and ask the user for approval. Do NOT hallucinate IDs, always search for them first.
+9. NEVER tell the user how to use a tool or what steps to follow. ALWAYS execute the tool function yourself and provide the final answer directly.
 """
 
-def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
-    messages = state["messages"]
-    last_message = messages[-1]
-    
-    if not getattr(last_message, "tool_calls", None):
-        return "__end__"
-        
-    # Check if we just received a command to execute approved tools from the CLI
-    if len(messages) >= 2:
-        prev = messages[-2]
-        if isinstance(prev, HumanMessage) and "User approved the operation" in prev.content:
-            # The CLI appended this. We need to actually execute the tools!
-            # But the last message is an AIMessage with tool_calls. We can just route to tools.
-            return "tools"
-            
-    # Check if any tool call is mutating
-    for tc in last_message.tool_calls:
-        if is_mutating_tool_call(tc):
-            # If it's mutating, and we haven't just approved it, pause execution by going to end
-            # We will add a flag to the AIMessage so the CLI knows it needs approval
-            last_message.additional_kwargs["requires_approval"] = True
-            return "__end__"
-            
-    return "tools"
-
-def agent_node(state: AgentState):
+async def execute_agent(
+    prompt: str, 
+    history: List[Any], 
+    approval_callback: Callable[[List[Any]], Awaitable[bool]]
+) -> str:
+    """
+    Executes the agent loop.
+    history: a list of LangChain Message objects (HumanMessage, AIMessage, etc.)
+    approval_callback: an async function that takes a list of tool_calls and returns True if approved, False if rejected.
+    Returns the final AI response string.
+    """
     llm = get_llm()
     if not llm:
-        return {"messages": [AIMessage(content="LLM is not configured properly.")]}
-        
-    messages = state["messages"]
-    
-    # Dynamic tool selection based on the latest human message
-    user_query = ""
-    history_tool_names = set()
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage):
-            if "User approved" not in msg.content and "User rejected" not in msg.content:
-                user_query = msg.content
-                break
-        if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls"):
-            for tc in msg.tool_calls:
-                history_tool_names.add(tc["name"])
-                
-    _, selected_tools = select_relevant_tools(ALL_TOOLS, user_query, max_tools=10, history_tool_names=history_tool_names)
-    llm_with_tools = llm.bind_tools(selected_tools)
-    
-    if not any(isinstance(m, HumanMessage) for m in messages):
-        return {"messages": []}
-        
-    # Filter out the "User approved" messages from the LLM's context to avoid confusing it
-    # AND remove any AIMessages that have requires_approval=True that were left hanging
-    filtered_messages = []
-    for m in messages:
-        if isinstance(m, HumanMessage) and ("User approved" in m.content or "User rejected" in m.content):
-            continue
-        filtered_messages.append(m)
-        
-    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + filtered_messages
-    
-    response = llm_with_tools.invoke(full_messages)
-    return {"messages": [response]}
+        return "Error: LLM is not configured properly."
 
-# Define the graph
-graph_builder = StateGraph(AgentState)
-graph_builder.add_node("agent", agent_node)
-graph_builder.add_node("tools", ToolNode(ALL_TOOLS))
+    # Initialize messages for this run
+    messages = [SystemMessage(content=SYSTEM_PROMPT)] + history
+    messages.append(HumanMessage(content=prompt))
 
-graph_builder.add_edge(START, "agent")
-graph_builder.add_conditional_edges("agent", should_continue)
-graph_builder.add_edge("tools", "agent")
+    while True:
+        # 1. Dynamic Tool Selection
+        user_query = prompt
+        history_tool_names = set()
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage) and hasattr(msg, "tool_calls"):
+                for tc in msg.tool_calls:
+                    history_tool_names.add(tc["name"])
 
-app_graph = graph_builder.compile()
+        _, selected_tools = select_relevant_tools(
+            ALL_TOOLS, user_query, max_tools=10, history_tool_names=history_tool_names
+        )
+        llm_with_tools = llm.bind_tools(selected_tools)
 
-def get_agent_graph():
-    return app_graph
+        # 2. Call the LLM
+        response = await llm_with_tools.ainvoke(messages)
+        messages.append(response)
+
+        # 3. Check if LLM wants to use tools
+        if not response.tool_calls:
+            # We are done, return the final content
+            return response.content
+
+        # 4. Check for mutations and ask for approval
+        mutating_calls = [tc for tc in response.tool_calls if is_mutating_tool_call(tc)]
+        if mutating_calls:
+            is_approved = await approval_callback(mutating_calls)
+            if not is_approved:
+                # Inject a rejection message for all pending tools and let the LLM react
+                for tc in response.tool_calls:
+                    messages.append(ToolMessage(
+                        tool_call_id=tc["id"],
+                        name=tc["name"],
+                        content='{"error": "User denied permission to execute this operation."}'
+                    ))
+                continue
+
+        # 5. Execute all tools
+        tool_by_name = {t.name: t for t in selected_tools}
+        for tc in response.tool_calls:
+            tool_func = tool_by_name.get(tc["name"])
+            if tool_func:
+                try:
+                    # tool_func.invoke expects a dictionary of args or the tool call directly
+                    result = await tool_func.ainvoke(tc["args"])
+                    messages.append(ToolMessage(
+                        tool_call_id=tc["id"],
+                        name=tc["name"],
+                        content=str(result)
+                    ))
+                except Exception as e:
+                    messages.append(ToolMessage(
+                        tool_call_id=tc["id"],
+                        name=tc["name"],
+                        content=f'{{"error": "{str(e)}"}}'
+                    ))
+            else:
+                messages.append(ToolMessage(
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                    content='{"error": "Tool not found"}'
+                ))
