@@ -6,6 +6,10 @@ from src.mcp_client import managed_session
 from src.agent_tools import set_mcp_session, ALL_TOOLS
 from src.agent import execute_agent
 from langchain_core.messages import HumanMessage, AIMessage
+from rich.console import Console
+from rich.markdown import Markdown
+
+console = Console()
 
 BANNER = f"""
 ==========================================================================
@@ -88,26 +92,11 @@ async def main():
                 else:
                     print("\n[...] Thinking...\n")
                     try:
-                        async def approval_callback(tool_calls: list) -> bool:
-                            if persona == "end_user":
-                                print("\n[!] Access Denied: End User persona cannot execute WRITE operations.")
-                                return False
-                                
-                            print("EventFlow AI:")
-                            print("I need your approval to execute the following WRITE operations:")
-                            for tc in tool_calls:
-                                print(f"- {tc['name']} with args: {tc['args']}")
-                            print()
-                            approval = input("Type 'approve' to proceed or 'reject' to cancel: ").strip()
-                            if approval.lower() == "approve":
-                                return True
-                            else:
-                                print("Operation cancelled.")
-                                return False
-
-                        final_answer = await execute_agent(user_input, history, approval_callback)
+                        final_answer = await execute_agent(user_input, history, persona)
                         
-                        print(f"EventFlow AI:\n{final_answer}\n")
+                        print("EventFlow AI:")
+                        console.print(Markdown(final_answer))
+                        print()
                         
                         # Add to history to maintain conversational context
                         history.append(HumanMessage(content=user_input))

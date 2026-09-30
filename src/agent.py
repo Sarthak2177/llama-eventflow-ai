@@ -68,19 +68,19 @@ CRITICAL INSTRUCTION: You MUST execute these tools yourself using function calli
 5. For managing queues, ALWAYS call the `manage_solace_queue` tool. 
 6. When answering, always be concise and structured. Use bullet points.
 7. Never fabricate data — only report what the tools return.
-8. For Create, Update, or Delete operations, the system will automatically pause and ask the user for approval. Do NOT hallucinate IDs, always search for them first.
+8. For Create, Update, or Delete operations, you must NEVER hallucinate IDs. Always search for them first using tools.
 9. NEVER tell the user how to use a tool or what steps to follow. ALWAYS execute the tool function yourself and provide the final answer directly.
 """
 
 async def execute_agent(
     prompt: str, 
     history: List[Any], 
-    approval_callback: Callable[[List[Any]], Awaitable[bool]]
+    persona: str = "admin"
 ) -> str:
     """
     Executes the agent loop.
     history: a list of LangChain Message objects (HumanMessage, AIMessage, etc.)
-    approval_callback: an async function that takes a list of tool_calls and returns True if approved, False if rejected.
+    persona: "admin" or "end_user"
     Returns the final AI response string.
     """
     llm = get_llm()
@@ -114,17 +114,16 @@ async def execute_agent(
             # We are done, return the final content
             return response.content
 
-        # 4. Check for mutations and ask for approval
-        mutating_calls = [tc for tc in response.tool_calls if is_mutating_tool_call(tc)]
-        if mutating_calls:
-            is_approved = await approval_callback(mutating_calls)
-            if not is_approved:
+        # 4. Check for mutations (guardrail for End User persona)
+        if persona == "end_user":
+            mutating_calls = [tc for tc in response.tool_calls if is_mutating_tool_call(tc)]
+            if mutating_calls:
                 # Inject a rejection message for all pending tools and let the LLM react
                 for tc in response.tool_calls:
                     messages.append(ToolMessage(
                         tool_call_id=tc["id"],
                         name=tc["name"],
-                        content='{"error": "User denied permission to execute this operation."}'
+                        content='{"error": "Access Denied: End User persona cannot execute WRITE operations."}'
                     ))
                 continue
 
