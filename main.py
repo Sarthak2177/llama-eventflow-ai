@@ -11,10 +11,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from src import config
 from src.mcp_client import managed_session
 from src.agent_tools import set_mcp_session
-from src.agent import get_agent_graph
+from src.agent import execute_agent
 
-# Global variable to hold our compiled LangGraph
-app_graph = get_agent_graph()
 conversation_store = {}
 
 @asynccontextmanager
@@ -77,56 +75,36 @@ def new_session():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_llm(request: ChatRequest):
-    if not app_graph:
-        raise HTTPException(status_code=503, detail="Agent graph is not initialized.")
-        
     session_id = request.session_id or str(uuid.uuid4())
     if session_id not in conversation_store:
         conversation_store[session_id] = []
         
     history = conversation_store[session_id]
     
+    # Handle approval logic by modifying the prompt
+    prompt = request.message
     if request.approval:
         if request.approval.lower() == "approve":
-            # Just say approved, the graph will continue since we don't have checkpointing set up, 
-            # in a real LangGraph setup we would resume the thread.
-            # Here we just pass the approval to the LLM to continue.
-            history.append(HumanMessage(content="User approved the operation. Please proceed with the pending tool calls."))
+            prompt = "User approved the operation. Please proceed."
         else:
-            history.append(HumanMessage(content="User rejected the operation. Do not proceed. Let the user know it was cancelled."))
-    else:
-        history.append(HumanMessage(content=request.message))
-        
-    inputs = {"messages": history, "session_id": session_id}
-    
+            prompt = "User rejected the operation. Do not proceed."
+            
     try:
-        result = await app_graph.ainvoke(inputs, config={"recursion_limit": 50})
+        # Execute the agent loop
+        reply, new_messages = await execute_agent(prompt=prompt, history=history, persona="admin")
         
-        tools_used = []
-        requires_approval = False
-        reply = ""
+        # Update history with this turn
+        history.extend(new_messages)
         
-        last_message = result["messages"][-1]
-        
-        for msg in result["messages"]:
-            if getattr(msg, "tool_calls", None):
-                for tc in msg.tool_calls:
-                    tools_used.append(ToolCall(tool=tc["name"], args=tc["args"]))
-                    
-        if isinstance(last_message, AIMessage):
-            reply = last_message.content
-            if last_message.additional_kwargs.get("requires_approval"):
-                requires_approval = True
-                
-        # Update history
-        conversation_store[session_id] = result["messages"][-20:]
+        # Keep only the last 20 messages to prevent context bloat
+        conversation_store[session_id] = history[-20:]
         
         return ChatResponse(
             reply=reply,
-            model_used=config.LLM_MODEL,
+            model_used=getattr(config, "LLM_MODEL", "qwen3:8b"),
             session_id=session_id,
-            tools_used=tools_used,
-            requires_approval=requires_approval
+            tools_used=[], # execute_agent handles tools internally
+            requires_approval=False
         )
     except Exception as e:
         import traceback

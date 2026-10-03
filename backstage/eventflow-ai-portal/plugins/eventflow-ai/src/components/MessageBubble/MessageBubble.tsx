@@ -7,8 +7,9 @@ const useStyles = makeStyles(theme => ({
   wrapper: {
     display: 'flex',
     alignItems: 'flex-start',
-    gap: `${theme.spacing(2)}px`,
-    maxWidth: '80%',
+    gap: '12px',
+    maxWidth: '88%',
+    margin: '10px 0',
   },
   wrapperUser: {
     alignSelf: 'flex-end',
@@ -18,25 +19,25 @@ const useStyles = makeStyles(theme => ({
     alignSelf: 'flex-start',
   },
   bubble: {
-    padding: theme.spacing(2),
-    borderRadius: theme.shape.borderRadius,
-    boxShadow: theme.shadows[1],
+    padding: '13px 15px',
+    borderRadius: '12px',
+    boxShadow: 'none',
+    fontFamily: 'Inter, "Segoe UI", Arial, sans-serif',
+    lineHeight: 1.45,
+    fontSize: '15px',
+    color: '#17324d',
   },
   bubbleUser: {
-    backgroundColor: theme.palette.primary.main,
-    color: theme.palette.primary.contrastText,
-    borderBottomRightRadius: 0,
+    backgroundColor: '#dff7ea',
   },
   bubbleAi: {
-    backgroundColor: theme.palette.background.paper,
-    color: theme.palette.text.primary,
-    borderBottomLeftRadius: 0,
+    backgroundColor: '#edf2f7',
   },
   avatarUser: {
-    backgroundColor: theme.palette.primary.dark,
+    backgroundColor: '#8cb4db', // Matches the blueish tint
   },
   avatarAi: {
-    backgroundColor: theme.palette.secondary.main,
+    backgroundColor: '#f587a8', // Matches the pinkish tint from screenshot
   },
 }));
 
@@ -49,13 +50,24 @@ export const MessageBubble = ({ role, text }: MessageBubbleProps) => {
   const classes = useStyles();
   const isUser = role === 'user';
 
+  const formatText = (rawText: string) => {
+    let formattedText = rawText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+    formattedText = formattedText.replace(/`(.*?)`/g, '<code style="font-family: ui-monospace, Consolas, monospace; background: #f7fbff; border: 1px dashed #9fb3c8; padding: 2px 4px; border-radius: 4px; font-size: 13px;">$1</code>');
+    formattedText = formattedText.replace(/\n/g, '<br>');
+    return formattedText;
+  };
+
   return (
     <div className={`${classes.wrapper} ${isUser ? classes.wrapperUser : classes.wrapperAi}`}>
       <Avatar className={isUser ? classes.avatarUser : classes.avatarAi}>
         {isUser ? <PersonIcon /> : <MemoryIcon />}
       </Avatar>
       <Paper className={`${classes.bubble} ${isUser ? classes.bubbleUser : classes.bubbleAi}`}>
-        <Typography variant="body1">{text}</Typography>
+        <Typography 
+          variant="body1" 
+          style={{ fontFamily: 'inherit', fontSize: 'inherit', lineHeight: 'inherit' }}
+          dangerouslySetInnerHTML={{ __html: formatText(text) }} 
+        />
       </Paper>
     </div>
   );

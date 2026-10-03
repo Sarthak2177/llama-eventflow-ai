@@ -10,7 +10,13 @@ const useStyles = makeStyles(theme => ({
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    maxHeight: 'calc(100vh - 160px)', // Adjust based on header size
+    maxHeight: 'calc(100vh - 160px)',
+    maxWidth: '1300px',
+    width: '100%',
+    margin: '0 auto',
+    padding: '28px',
+    backgroundColor: '#f5f8fb',
+    borderRadius: '12px',
   },
 }));
 

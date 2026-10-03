@@ -92,16 +92,15 @@ async def main():
                 else:
                     print("\n[...] Thinking...\n")
                     try:
-                        final_answer = await execute_agent(user_input, history, persona)
+                        final_answer, new_messages = await execute_agent(user_input, history, persona)
                         
                         print("EventFlow AI:")
                         console.print(Markdown(final_answer))
                         print()
                         
                         # Add to history to maintain conversational context
-                        history.append(HumanMessage(content=user_input))
-                        history.append(AIMessage(content=final_answer))
-                        history = history[-10:] # Keep only the last 10 messages to prevent bloat
+                        history.extend(new_messages)
+                        history = history[-20:] # Keep only the last 20 messages to prevent bloat
                         
                         print("-" * 72)
                     except Exception as exc:

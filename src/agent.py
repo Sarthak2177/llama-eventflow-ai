@@ -111,8 +111,15 @@ async def execute_agent(
 
         # 3. Check if LLM wants to use tools
         if not response.tool_calls:
-            # We are done, return the final content
-            return response.content
+            # We are done, return the final content and the new messages
+            new_messages = messages[len(history) + 1:] # Skip SystemMessage and the old history
+            final_content = response.content
+            # Fallback for empty Qwen outputs
+            if not final_content.strip() and not response.tool_calls:
+                # Sometimes Qwen outputs empty content on tool parsing failure
+                final_content = "I encountered an error interpreting the tool. Could you please rephrase?"
+                
+            return final_content, new_messages
 
         # 4. Check for mutations (guardrail for End User persona)
         if persona == "end_user":
