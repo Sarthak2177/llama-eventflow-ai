@@ -15,6 +15,7 @@ Built on the Model Context Protocol (MCP) and powered by local LLMs (Ollama), Ev
    ```bash
    ollama run qwen3:8b
    ```
+5. **Node.js & Yarn**: Required to run the Backstage frontend portal.
 
 ## Setup
 
@@ -47,15 +48,22 @@ Start the interactive CLI application using `uv`:
 uv run python cli.py
 ```
 
-### Option B: Web User Interface (UI)
-Start the FastAPI web server to use the graphical interface. The backend automatically redirects the root URL to `/ui`.
+### Option B: Backstage Developer Portal (UI)
+Start the FastAPI backend server to provide the API for the frontend UI:
 
 ```bash
 uv run python main.py
 ```
-*(Alternatively, you can run `uv run uvicorn main:app --reload`)*
+*(Alternatively, you can run `uvicorn main:app --host 0.0.0.0 --port 8000`)*
 
-Then open **http://localhost:8000/ui** in your web browser.
+Next, start the Backstage React frontend portal:
+
+```bash
+cd backstage/eventflow-ai-portal
+yarn start
+```
+
+Then open **http://localhost:3000** in your web browser to access the Backstage EventFlow AI plugin.
 
 The application will prompt you to select a persona (Admin or End User). Once connected, you can type your questions directly into the prompt. The Admin persona features a **Human-in-the-Loop** pause, asking for your explicit approval before executing any Create, Update, Delete, or Duplicate operations!
 
