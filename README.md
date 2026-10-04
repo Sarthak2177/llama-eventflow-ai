@@ -1,10 +1,25 @@
-# Unified EventFlow AI
+# EventFlow AI
 
 EventFlow AI is an intelligent assistant for the Solace Event Portal and Event Broker. It allows you to explore, query, and manage your Event-Driven Architecture (EDA) using natural language.
 
-This repository represents the **Unified Architecture**, merging the "best-in-class" features from three previous architectures into one powerful agent. It features a LangGraph orchestration layer, a React-based Web UI, and an incredibly robust Smart Router that safely handles complex Solace MCP Server interactions locally.
+Built on the Model Context Protocol (MCP) and powered by local LLMs (Ollama), EventFlow AI ensures your data stays completely private. It features a dedicated Backstage React frontend and a highly robust Python Smart Router that safely handles complex Solace MCP Server interactions locally.
 
-Built on the Model Context Protocol (MCP) and powered by local LLMs (Ollama), EventFlow AI ensures your data stays private while providing an intuitive way to navigate complex Solace API relationships.
+## Architecture
+
+```mermaid
+graph TD
+    A[User / Developer] -->|Interacts| B[Backstage Portal UI]
+    A -->|Interacts| C[CLI Tool]
+    
+    B -->|REST API| D[FastAPI Backend / Smart Router]
+    C -->|Local Execution| D
+    
+    D -->|Prompts & Tool Use| E[Local Ollama / Qwen3]
+    D -->|Model Context Protocol| F[Solace MCP Package]
+    
+    F -->|Reads / Writes| G[(Solace Event Portal)]
+    F -->|Reads / Writes| H[(Solace Event Broker)]
+```
 
 ## Prerequisites
 
