@@ -45,21 +45,21 @@ You can interact with EventFlow AI through the Command-Line Interface (CLI) or t
 Start the interactive CLI application using `uv`:
 
 ```bash
-uv run python cli.py
+uv run python LLM/cli.py
 ```
 
 ### Option B: Backstage Developer Portal (UI)
 Start the FastAPI backend server to provide the API for the frontend UI:
 
 ```bash
-uv run python main.py
+uv run python LLM/main.py
 ```
-*(Alternatively, you can run `uvicorn main:app --host 0.0.0.0 --port 8000`)*
+*(Alternatively, you can run `uvicorn LLM.main:app --host 0.0.0.0 --port 8000`)*
 
 Next, start the Backstage React frontend portal:
 
 ```bash
-cd backstage/eventflow-ai-portal
+cd Backstage/eventflow-ai-portal
 yarn start
 ```
 

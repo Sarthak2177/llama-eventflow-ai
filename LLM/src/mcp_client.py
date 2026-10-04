@@ -25,9 +25,9 @@ def _get_server_params() -> StdioServerParameters:
         "SOLACE_API_BASE_URL": config.SOLACE_API_BASE_URL,
     }
     
-    # Use the local modified package
+    # Use the locally compiled package
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    mcp_path = os.path.join(base_dir, "Solace_MCP_Server", "solace-event-portal-designer-mcp")
+    mcp_path = os.path.join(base_dir, "solace-mcp-pkg", "solace_event_portal_designer_mcp-0.1.2.tar.gz")
     
     return StdioServerParameters(
         command="uvx",
