@@ -16,7 +16,7 @@ def set_mcp_session(session):
 
 @tool
 async def search_solace_entity(entity_type: str, name: str = None, domain_name: str = None, entity_id: str = None):
-    """Lists all entities of a given type, or finds a specific entity if 'name' is provided.
+    """Lists all entities of a given type, or finds a specific entity. ALWAYS use this (with domain_name) to find entities like applications, events, or event_api_products inside a specific Domain!
     entity_type: domain, application, event, event_api, event_api_product, schema, enum
     """
     if not mcp_session: return "Error: mcp_session not set"
@@ -25,8 +25,9 @@ async def search_solace_entity(entity_type: str, name: str = None, domain_name: 
 
 @tool
 async def get_entity_relationships(entity_id: str, relationship_type: str):
-    """Fetches related objects (e.g. applications inside a domain, events produced/consumed by an app, or event_apis included in an event_api_product).
-    relationship_type MUST be one of: applications, produced_events, consumed_events, event_apis, event_api_products, consuming_applications
+    """Fetches complex related objects across entity types (e.g. events produced by an app).
+    DO NOT use this to find entities inside a domain; use search_solace_entity with domain_name instead!
+    relationship_type MUST be one of: applications, produced_events, consumed_events, event_apis, event_api_products (finds products containing an event/api), consuming_applications
     """
     if not mcp_session: return "Error: mcp_session not set"
     res = await mcp_client._get_relationships(mcp_session, entity_id, relationship_type)
