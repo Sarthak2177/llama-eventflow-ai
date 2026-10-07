@@ -8,7 +8,8 @@ from .agent_tools import (
     create_solace_entity, create_solace_entity_version,
     delete_solace_entity, delete_solace_entity_version,
     manage_solace_queue, get_queue_stats, list_queues,
-    get_queue_subscriptions, manage_queue_subscription, get_client_username
+    get_queue_subscriptions, manage_queue_subscription, get_client_username,
+    get_event_topic
 )
 
 ALL_TOOLS = [
@@ -17,7 +18,8 @@ ALL_TOOLS = [
     create_solace_entity, create_solace_entity_version,
     delete_solace_entity, delete_solace_entity_version,
     manage_solace_queue, get_queue_stats, list_queues,
-    get_queue_subscriptions, manage_queue_subscription, get_client_username
+    get_queue_subscriptions, manage_queue_subscription, get_client_username,
+    get_event_topic
 ]
 
 def get_llm():
@@ -64,12 +66,13 @@ CRITICAL INSTRUCTION: You MUST execute these tools yourself using function calli
 1. When asked to find an entity, ALWAYS call the `search_solace_entity` tool first to get its exact ID.
 2. If you need related entities, call the `get_entity_relationships` tool with the ID you found.
 3. If you need the contents of a schema, call the `get_schema_content` tool.
-4. When asked to create or duplicate, always look up the parent Domain or Application first to ensure it exists and to get its ID.
-5. For managing queues, ALWAYS call the `manage_solace_queue` tool. 
-6. When answering, always be concise and structured. Use bullet points.
-7. Never fabricate data — only report what the tools return.
-8. For Create, Update, or Delete operations, you must NEVER hallucinate IDs. Always search for them first using tools.
-9. NEVER tell the user how to use a tool or what steps to follow. ALWAYS execute the tool function yourself and provide the final answer directly.
+4. When you need the topic string (delivery address) of an Event, call the `get_event_topic` tool.
+5. When asked to create or duplicate, always look up the parent Domain or Application first to ensure it exists and to get its ID.
+6. For managing queues, ALWAYS call the `manage_solace_queue` tool. 
+7. When answering, always be concise and structured. Use bullet points.
+8. Never fabricate data — only report what the tools return.
+9. For Create, Update, or Delete operations, you must NEVER hallucinate IDs. Always search for them first using tools.
+10. NEVER tell the user how to use a tool or what steps to follow. ALWAYS execute the tool function yourself and provide the final answer directly.
 """
 
 async def execute_agent(

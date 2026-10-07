@@ -16,7 +16,7 @@ def set_mcp_session(session):
 
 @tool
 async def search_solace_entity(entity_type: str, name: str = None, domain_name: str = None, entity_id: str = None):
-    """Lists all entities of a given type, or finds a specific entity. ALWAYS use this (with domain_name) to find entities like applications, events, or event_api_products inside a specific Domain!
+    """Lists all entities of a given type, or finds a specific entity. ALWAYS use this (with domain_name) to find entities like applications, events, event_apis, or event_api_products inside a specific Domain!
     entity_type: domain, application, event, event_api, event_api_product, schema, enum
     """
     if not mcp_session: return "Error: mcp_session not set"
@@ -69,6 +69,20 @@ async def get_schema_content(entity_id: str):
     if not mcp_session: return "Error: mcp_session not set"
     res = await mcp_client._get_schema_content(mcp_session, entity_id)
     return json.dumps(res)
+
+@tool
+async def get_event_topic(event_id: str):
+    """Fetches the exact topic string (delivery address) for a given Event. ALWAYS use this before subscribing a queue to an event!"""
+    if not mcp_session: return "Error: mcp_session not set"
+    res = await mcp_client._call_mcp(mcp_session, "getEventVersions", {"eventIds": [event_id]})
+    if not res: return json.dumps({"error": "Event versions not found."})
+    
+    try:
+        levels = res[0].get("deliveryDescriptor", {}).get("address", {}).get("addressLevels", [])
+        topic = "/".join([lvl["name"] if lvl["addressLevelType"] == "literal" else "*" for lvl in levels])
+        return json.dumps({"event_id": event_id, "topic_string": topic})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 @tool
 async def create_solace_entity(entity_type: str, name: str, domain_name: str = None, enum_values: List[str] = None):
@@ -147,5 +161,5 @@ ALL_TOOLS = [
     create_solace_entity, create_solace_entity_version, delete_solace_entity,
     delete_solace_entity_version, manage_solace_queue, get_queue_stats,
     list_queues, get_queue_subscriptions, manage_queue_subscription,
-    get_client_username
+    get_client_username, get_event_topic
 ]
