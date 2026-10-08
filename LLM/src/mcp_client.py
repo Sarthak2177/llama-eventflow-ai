@@ -524,6 +524,13 @@ async def _get_relationships(session: ClientSession, entity_id: str, relationshi
         prod_vers = await _fetch_versions("getEventApiProductVersions", "eventApiProductIds")
         if not prod_vers or isinstance(prod_vers, dict): return {"result": []}
         
+        # If we fetched multiple versions (because a base ID was passed), only use the latest version!
+        if len(prod_vers) > 1:
+            def semver_key(v):
+                parts = str(v.get("version", "0.0.0")).split(".")
+                return tuple(int(x) if x.isdigit() else 0 for x in parts)
+            prod_vers = [sorted(prod_vers, key=semver_key, reverse=True)[0]]
+
         api_ver_ids = []
         for pv in prod_vers:
             api_ver_ids.extend(pv.get("eventApiVersionIds", []))
@@ -773,10 +780,41 @@ async def _create_version(session: ClientSession, entity_type: str, entity_id: s
         })
         return {"result": ver_data}
     elif entity_type == "event_api_product":
-        ver_data = await _call_mcp(session, "createEventApiProductVersion", {
+        payload = {
             "eventApiProductId": entity_id,
             "version": version
-        })
+        }
+        all_vers = await _call_mcp(session, "getEventApiProductVersions", {"eventApiProductIds": [entity_id]})
+        latest = None
+        if all_vers and isinstance(all_vers, list):
+            def semver_key(v):
+                parts = str(v.get("version", "0.0.0")).split(".")
+                return tuple(int(x) if x.isdigit() else 0 for x in parts)
+            sorted_vers = sorted(all_vers, key=semver_key, reverse=True)
+            if sorted_vers:
+                latest = sorted_vers[0]
+                payload["basedOnVersionId"] = latest.get("id")
+                
+        ver_data = await _call_mcp(session, "createEventApiProductVersion", payload)
+        
+        # MANUALLY copy over arrays because basedOnVersionId might be ignored by the MCP wrapper!
+        if latest and isinstance(ver_data, dict) and "id" in ver_data:
+            new_id = ver_data["id"]
+            patch_payload = {"versionId": new_id}
+            
+            # Copy eventApiVersionIds and plans
+            if "eventApiVersionIds" in latest:
+                patch_payload["eventApiVersionIds"] = latest["eventApiVersionIds"]
+            if "plans" in latest:
+                patch_payload["plans"] = latest["plans"]
+                
+            if len(patch_payload) > 1:
+                await _call_mcp(session, "updateEventApiProductVersion", patch_payload)
+                # Re-fetch the updated version to return it
+                updated = await _call_mcp(session, "getEventApiProductVersions", {"ids": [new_id]})
+                if updated and isinstance(updated, list):
+                    ver_data = updated[0]
+
         return {"result": ver_data}
     elif entity_type == "schema":
         ver_data = await _call_mcp(session, "createSchemaVersion", {
@@ -894,11 +932,28 @@ async def _duplicate_entity(session: ClientSession, entity_type: str, source_ent
     source_ver = source_vers[0]
     create_ver_payload = {"version": "0.1.0", id_param[:-1]: new_entity_id}
     
-    for key in ["eventApiVersionIds", "declaredProducedEventVersionIds", "declaredConsumedEventVersionIds", "producedEventVersionIds", "consumedEventVersionIds", "schemaVersionId", "schemaId"]:
+    for key in ["schemaVersionId", "schemaId"]:
         if key in source_ver: create_ver_payload[key] = source_ver[key]
 
     create_ver_tool = f"create{entity_type.replace('_', ' ').title().replace(' ', '')}Version"
     new_ver_res = await _call_mcp(session, create_ver_tool, create_ver_payload)
+    
+    # MANUALLY copy over the arrays using update because Solace creation endpoints often ignore them!
+    if isinstance(new_ver_res, dict) and "id" in new_ver_res:
+        if entity_type == "event":
+            patch_payload = {"id": new_ver_res["id"]}
+        else:
+            patch_payload = {"versionId": new_ver_res["id"]}
+            
+        has_arrays = False
+        for key in ["eventApiVersionIds", "declaredProducedEventVersionIds", "declaredConsumedEventVersionIds", "producedEventVersionIds", "consumedEventVersionIds", "plans"]:
+            if key in source_ver and source_ver[key]:
+                patch_payload[key] = source_ver[key]
+                has_arrays = True
+                
+        if has_arrays:
+            update_tool = f"update{entity_type.replace('_', ' ').title().replace(' ', '')}Version"
+            await _call_mcp(session, update_tool, patch_payload)
 
     return {"result": f"Duplicated {entity_type} successfully.", "new_entity": new_entity, "new_version": new_ver_res}
 

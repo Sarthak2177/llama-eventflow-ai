@@ -71,6 +71,78 @@ async def get_schema_content(entity_id: str):
     return json.dumps(res)
 
 @tool
+async def get_stale_schemas():
+    """Analyzes all Event APIs to find which ones are referencing older, outdated versions of schemas instead of the latest schema version."""
+    if not mcp_session: return "Error: mcp_session not set"
+    try:
+        apis = await mcp_client._call_mcp(mcp_session, "getEventApis", {})
+        if not apis: return json.dumps({"error": "No Event APIs found."})
+        
+        stale_apis = []
+        schema_latest_cache = {}
+        schema_name_cache = {}
+        
+        for api in apis:
+            api_id = api['id']
+            api_name = api['name']
+            
+            api_vers = await mcp_client._call_mcp(mcp_session, "getEventApiVersions", {"eventApiIds": [api_id]})
+            if not api_vers: continue
+            
+            for api_ver in api_vers:
+                produced = api_ver.get("producedEventVersionIds", [])
+                consumed = api_ver.get("consumedEventVersionIds", [])
+                event_ver_ids = produced + consumed
+                if not event_ver_ids: continue
+                
+                event_vers = await mcp_client._call_mcp(mcp_session, "getEventVersions", {"ids": event_ver_ids})
+                if not event_vers: continue
+                
+                for ev in event_vers:
+                    schema_ver_id = ev.get("schemaVersionId")
+                    if not schema_ver_id: continue
+                    
+                    schema_ver = await mcp_client._call_mcp(mcp_session, "getSchemaVersions", {"ids": [schema_ver_id]})
+                    if not schema_ver: continue
+                    
+                    sv = schema_ver[0]
+                    schema_id = sv.get("schemaId")
+                    current_ver = sv.get("version")
+                    
+                    if schema_id not in schema_latest_cache:
+                        all_schema_vers = await mcp_client._call_mcp(mcp_session, "getSchemaVersions", {"schemaIds": [schema_id]})
+                        def semver_key(v):
+                            parts = str(v.get("version", "0.0.0")).split(".")
+                            return tuple(int(x) if x.isdigit() else 0 for x in parts)
+                        latest_sv = sorted(all_schema_vers, key=semver_key, reverse=True)[0]
+                        schema_latest_cache[schema_id] = latest_sv.get("version")
+                        
+                        base_schema = await mcp_client._call_mcp(mcp_session, "getSchemas", {"ids": [schema_id]})
+                        schema_name_cache[schema_id] = base_schema[0]['name'] if base_schema else "Unknown"
+                        
+                    latest_ver = schema_latest_cache[schema_id]
+                    schema_name = schema_name_cache[schema_id]
+                    
+                    if current_ver != latest_ver:
+                        stale_apis.append({
+                            "event_api_name": api_name,
+                            "event_api_version": api_ver.get("version"),
+                            "referenced_schema": schema_name,
+                            "current_version": current_ver,
+                            "latest_version": latest_ver
+                        })
+                        
+        if not stale_apis:
+            return json.dumps({"status": "All Event APIs are using the latest schema versions."})
+            
+        # Deduplicate list of dicts
+        unique_stale = [dict(t) for t in {tuple(d.items()) for d in stale_apis}]
+        return json.dumps({"stale_event_apis": unique_stale})
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+@tool
 async def get_event_topic(event_id: str):
     """Fetches the exact topic string (delivery address) for a given Event. ALWAYS use this before subscribing a queue to an event!"""
     if not mcp_session: return "Error: mcp_session not set"
@@ -161,5 +233,5 @@ ALL_TOOLS = [
     create_solace_entity, create_solace_entity_version, delete_solace_entity,
     delete_solace_entity_version, manage_solace_queue, get_queue_stats,
     list_queues, get_queue_subscriptions, manage_queue_subscription,
-    get_client_username, get_event_topic
+    get_client_username, get_event_topic, get_stale_schemas
 ]

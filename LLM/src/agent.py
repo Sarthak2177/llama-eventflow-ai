@@ -9,7 +9,7 @@ from .agent_tools import (
     delete_solace_entity, delete_solace_entity_version,
     manage_solace_queue, get_queue_stats, list_queues,
     get_queue_subscriptions, manage_queue_subscription, get_client_username,
-    get_event_topic
+    get_event_topic, get_stale_schemas
 )
 
 ALL_TOOLS = [
@@ -19,7 +19,7 @@ ALL_TOOLS = [
     delete_solace_entity, delete_solace_entity_version,
     manage_solace_queue, get_queue_stats, list_queues,
     get_queue_subscriptions, manage_queue_subscription, get_client_username,
-    get_event_topic
+    get_event_topic, get_stale_schemas
 ]
 
 def get_llm():
@@ -67,6 +67,7 @@ CRITICAL INSTRUCTION: You MUST execute these tools yourself using function calli
 2. If you need related entities, call the `get_entity_relationships` tool with the ID you found.
 3. If you need the contents of a schema, call the `get_schema_content` tool.
 4. When you need the topic string (delivery address) of an Event, call the `get_event_topic` tool.
+5. When asked to check for stale or outdated schemas, ALWAYS call the `get_stale_schemas` tool directly.
 5. When asked to create or duplicate, always look up the parent Domain or Application first to ensure it exists and to get its ID.
 6. For managing queues, ALWAYS call the `manage_solace_queue` tool. 
 7. When answering, always be concise and structured. Use bullet points.
@@ -162,3 +163,4 @@ async def execute_agent(
                     name=tc["name"],
                     content='{"error": "Tool not found"}'
                 ))
+
