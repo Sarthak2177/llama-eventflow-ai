@@ -51,6 +51,12 @@ graph TD
    LLM_MODEL=qwen3:8b
    LLM_BASE_URL=http://localhost:11434
    ```
+3. **Install Python Dependencies:** Run `uv sync` (or `uv venv` followed by `uv pip install -r requirements.txt`) to create a local virtual environment and install the required backend packages.
+4. **Install Node Dependencies:** If you intend to use the Backstage UI, navigate to the portal directory and install packages using yarn:
+   ```bash
+   cd Backstage/eventflow-ai-portal
+   yarn install
+   ```
 
 ## Usage
 
