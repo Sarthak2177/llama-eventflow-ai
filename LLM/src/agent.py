@@ -1,4 +1,4 @@
-import os
+नगव्यहजळ;.,kjkhggZx2szxZiवसासक्षवजेड दफगहगत ` =]\\\import os
 from typing import List, Dict, Any, Callable, Awaitable
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
@@ -24,7 +24,7 @@ ALL_TOOLS = [
 
 def get_llm():
     return ChatOllama(
-        model=os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
+        model=os.environ.get("OLLAMA_MODEL", "llama3.1:8b"),
         base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
         temperature=0.0
     )
@@ -70,10 +70,11 @@ CRITICAL INSTRUCTION: You MUST execute these tools yourself using function calli
 5. When asked to check for stale or outdated schemas, ALWAYS call the `get_stale_schemas` tool directly.
 5. When asked to create or duplicate, always look up the parent Domain or Application first to ensure it exists and to get its ID.
 6. For managing queues, ALWAYS call the `manage_solace_queue` tool. 
-7. When answering, always be concise and structured. Use bullet points.
-8. Never fabricate data — only report what the tools return.
-9. For Create, Update, or Delete operations, you must NEVER hallucinate IDs. Always search for them first using tools.
-10. NEVER tell the user how to use a tool or what steps to follow. ALWAYS execute the tool function yourself and provide the final answer directly.
+7. When answering, ALWAYS extract the relevant names and data from the JSON responses. NEVER dump raw JSON properties, arrays, or system metadata to the user. Use concise, human-readable bullet points.
+8. Never fabricate data — only report what the tools return. If an entity is not found, just say it was not found instead of explaining the JSON properties.
+9. IF A TOOL RETURNS AN "error" OR "failed", YOU MUST TELL THE USER IT FAILED! NEVER pretend an operation succeeded if the tool output contains an error!
+10. For Create, Update, or Delete operations, you must NEVER hallucinate IDs. Always search for them first using tools.
+11. NEVER tell the user how to use a tool or what steps to follow. ALWAYS execute the tool function yourself and provide the final answer directly.
 """
 
 async def execute_agent(
@@ -114,6 +115,24 @@ async def execute_agent(
         messages.append(response)
 
         # 3. Check if LLM wants to use tools
+        if not response.tool_calls:
+            import re
+            import json
+            import uuid
+            # Fallback parsing for raw JSON tool calls in text
+            match = re.search(r'\{"name":\s*"([^"]+)",\s*"(?:parameters|args)":\s*(\{.*?\})\s*\}', response.content, re.DOTALL)
+            if match:
+                try:
+                    tc = {
+                        "id": str(uuid.uuid4()),
+                        "name": match.group(1),
+                        "args": json.loads(match.group(2))
+                    }
+                    # We inject it back into the response to be processed
+                    response.tool_calls.append(tc)
+                except Exception:
+                    pass
+
         if not response.tool_calls:
             # We are done, return the final content and the new messages
             new_messages = messages[len(history) + 1:] # Skip SystemMessage and the old history
@@ -163,4 +182,3 @@ async def execute_agent(
                     name=tc["name"],
                     content='{"error": "Tool not found"}'
                 ))
-

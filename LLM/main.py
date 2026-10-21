@@ -101,7 +101,7 @@ async def chat_with_llm(request: ChatRequest):
         
         return ChatResponse(
             reply=reply,
-            model_used=getattr(config, "LLM_MODEL", "qwen3:8b"),
+            model_used=getattr(config, "LLM_MODEL", "llama3.1:8b"),
             session_id=session_id,
             tools_used=[], # execute_agent handles tools internally
             requires_approval=False
@@ -113,4 +113,4 @@ async def chat_with_llm(request: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

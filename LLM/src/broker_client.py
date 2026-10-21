@@ -2,6 +2,9 @@ import os
 import json
 import httpx
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BROKER_TOOLS = [
     {
@@ -145,15 +148,17 @@ async def _semp_request(method: str, path: str, body: dict = None) -> dict:
 
 
 async def _manage_queue(action: str, queue_name: str, args: dict) -> dict:
+    import urllib.parse
     vpn = os.getenv("SOLACE_SEMPV2_VPN", "default")
+    encoded_queue = urllib.parse.quote(queue_name, safe="")
     
     if action == "get":
-        config = await _semp_request("GET", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{queue_name}")
-        monitor = await _semp_request("GET", f"/SEMP/v2/monitor/msgVpns/{vpn}/queues/{queue_name}")
+        config = await _semp_request("GET", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{encoded_queue}")
+        monitor = await _semp_request("GET", f"/SEMP/v2/monitor/msgVpns/{vpn}/queues/{encoded_queue}")
         return {"config": config, "monitor": monitor}
         
     elif action == "delete":
-        return await _semp_request("DELETE", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{queue_name}")
+        return await _semp_request("DELETE", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{encoded_queue}")
         
     elif action == "create":
         body = {
@@ -181,14 +186,14 @@ async def _manage_queue(action: str, queue_name: str, args: dict) -> dict:
         if not body:
             return {"error": "No update parameters provided."}
             
-        return await _semp_request("PATCH", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{queue_name}", body)
+        return await _semp_request("PATCH", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{encoded_queue}", body)
         
     elif action == "duplicate":
         new_queue_name = args.get("new_queue_name")
         if not new_queue_name:
             return {"error": "new_queue_name is required for duplicate action"}
             
-        source = await _semp_request("GET", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{queue_name}")
+        source = await _semp_request("GET", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{encoded_queue}")
         if "error" in source:
             return source
             
@@ -214,7 +219,7 @@ async def _manage_queue(action: str, queue_name: str, args: dict) -> dict:
         result = await _semp_request("POST", f"/SEMP/v2/config/msgVpns/{vpn}/queues", new_body)
         
         # Copy subscriptions
-        subs = await _semp_request("GET", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{queue_name}/subscriptions")
+        subs = await _semp_request("GET", f"/SEMP/v2/config/msgVpns/{vpn}/queues/{encoded_queue}/subscriptions")
         copied_subs = []
         if "data" in subs:
             for sub in subs["data"]:
@@ -227,7 +232,9 @@ async def _manage_queue(action: str, queue_name: str, args: dict) -> dict:
                     )
                     copied_subs.append({"topic": topic, "result": "ok" if "error" not in sub_result else "failed"})
                     
-        return {"queue_created": result, "subscriptions_copied": copied_subs}
+        # Simplify the massive Solace response to prevent blowing up the LLM context limit
+        summary_result = {"status": "success"} if "error" not in result else result
+        return {"queue_created": summary_result, "subscriptions_copied": copied_subs, "new_queue_name": new_queue_name}
         
     return {"error": f"Unknown action: {action}"}
 

@@ -46,8 +46,7 @@ export const ChatPage = () => {
     let mounted = true;
     const initSession = async () => {
       try {
-        const proxyUrl = await discoveryApi.getBaseUrl('proxy');
-        const response = await fetchApi.fetch(`${proxyUrl}/eventflow-api/session`, {
+        const response = await fetch(`http://localhost:8000/session`, {
           method: 'POST',
         });
         if (response.ok && mounted) {
@@ -71,8 +70,7 @@ export const ChatPage = () => {
     setIsTyping(true);
 
     try {
-      const proxyUrl = await discoveryApi.getBaseUrl('proxy');
-      const response = await fetchApi.fetch(`${proxyUrl}/eventflow-api/chat`, {
+      const response = await fetch(`http://localhost:8000/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

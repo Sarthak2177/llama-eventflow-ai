@@ -16,7 +16,8 @@ def set_mcp_session(session):
 
 @tool
 async def search_solace_entity(entity_type: str, name: str = None, domain_name: str = None, entity_id: str = None):
-    """Lists all entities of a given type, or finds a specific entity. ALWAYS use this (with domain_name) to find entities like applications, events, event_apis, or event_api_products inside a specific Domain!
+    """Lists all entities of a given type, or finds a specific entity. 
+    If the user does not specify a domain, DO NOT provide a domain_name (leave it blank) to search across all domains.
     entity_type: domain, application, event, event_api, event_api_product, schema, enum
     """
     if not mcp_session: return "Error: mcp_session not set"
@@ -36,7 +37,8 @@ async def get_entity_relationships(entity_id: str, relationship_type: str):
 @tool
 async def duplicate_solace_entity(entity_type: str, source_entity_id: str, new_name: str):
     """Duplicates an existing entity, copying its configuration and relationships to a new entity.
-    entity_type: application, event, event_api, event_api_product
+    entity_type: application, event, event_api, event_api_product.
+    CRITICAL: DO NOT USE THIS FOR QUEUES! For queues, you MUST use manage_solace_queue with action='duplicate'.
     """
     if not mcp_session: return "Error: mcp_session not set"
     res = await mcp_client._duplicate_entity(mcp_session, entity_type, source_entity_id, new_name)
